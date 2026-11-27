@@ -53,7 +53,7 @@ if not cyr_col or not lat_col or votes[cyr_col]["cyr"] == 0 or votes[lat_col]["l
 for sp in ds.keys():
     d = ds[sp]
     cers, exact, wok, wall, n = [], 0, 0, 0, 0
-    conf = Counter()
+    conf = Counter(); epos = Counter()
     for i, r in enumerate(d):
         if i >= MAXR: break
         lat, cyr = r.get(lat_col), r.get(cyr_col)
@@ -66,7 +66,11 @@ for sp in ds.keys():
         sm = difflib.SequenceMatcher(None, cyr, h, autojunk=False)
         for op, a0, a1, b0, b1 in sm.get_opcodes():
             if op == "replace" and (a1 - a0) == (b1 - b0):
-                for x, y in zip(cyr[a0:a1], h[b0:b1]): conf[(x, y)] += 1
+                for k, (x, y) in enumerate(zip(cyr[a0:a1], h[b0:b1])):
+                    conf[(x, y)] += 1
+                    if (x, y) in (("\u0435", "\u044d"), ("\u0415", "\u042d")):   # human e vs our e-reverse
+                        pre = cyr[a0 + k - 1] if a0 + k > 0 else " "
+                        epos["word-initial" if not pre.isalpha() else "word-internal"] += 1
             elif op == "delete":   # present in human, missing in hypothesis
                 for x in cyr[a0:a1]: conf[(x, "<none>")] += 1
             elif op == "insert":   # extra in hypothesis
@@ -75,6 +79,7 @@ for sp in ds.keys():
     q = sorted(cers)
     print(f"\n[{sp}] n={n} meanCER={sum(cers)/n:.4f} medianCER={statistics.median(cers):.4f} "
           f"p90={q[int(.9*(n-1))]:.4f} sentExact={exact/n:.3f} wordExact={wok/max(wall,1):.3f} (over {wall} words)")
+    print("human e vs our e-reverse by position:", dict(epos))
     print("top single-character confusions (human -> rule-based): count")
     for (x, y), c in conf.most_common(15):
         print(f"  {x!r} -> {y!r}: {c}")
