@@ -13,11 +13,21 @@ from translit_uz import lat2cyr, char_error_rate
 DS = sys.argv[1]
 MAXR = int(sys.argv[2]) if len(sys.argv) > 2 else 4000   # rows per split
 tok = None
-try:
-    from kaggle_secrets import UserSecretsClient
-    tok = UserSecretsClient().get_secret("HF_TOKEN")
-except Exception:
-    import os; tok = os.environ.get("HF_TOKEN")
+import os
+tok = os.environ.get("HF_TOKEN")
+if not tok:
+    try:
+        from kaggle_secrets import UserSecretsClient
+        us = UserSecretsClient()
+        for label in ("HF_TOKEN", "uz_script_robustness"):   # secret label may be either
+            try:
+                tok = us.get_secret(label); print("token read from secret:", label); break
+            except Exception:
+                pass
+    except Exception:
+        pass
+if not tok:
+    sys.exit("No token found: add a Kaggle secret (label HF_TOKEN or uz_script_robustness) and attach it to the notebook.")
 from datasets import load_dataset
 from itertools import islice
 ds = load_dataset(DS, token=tok, streaming=True)   # streaming: avoids downloading the audio of the whole corpus
