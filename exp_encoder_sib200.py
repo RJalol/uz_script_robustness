@@ -9,8 +9,9 @@ test conditions : latn | latn_norm (control) | cyrl   (all evaluated for every t
 Protocol (kept identical to the author's earlier news-classification protocol)
 ------------------------------------------------------------------------------
 * Same lr grid for every model: 3e-5, 5e-5, 1e-4
-* Pilot : seed 13, train=latn, selection on validation Macro-F1 (val=latn)
-* Final : the selected lr is reused (NO re-tuning) for train=cyrl and train=mixed
+* Pilot : seed 13, lr selected SEPARATELY per training condition (latn, cyrl, mixed) on validation
+          Macro-F1 of that condition (removes the lr confound of the first run)
+* Final : each training condition uses its own selected lr
 * Checkpoint selection per run: best validation Macro-F1 *in the training condition*
 * Final seeds: 13 21 42 7 99  (n=5; SIB-200 test has only 204 items, so more seeds help)
 
@@ -168,31 +169,39 @@ def main():
     label2id = {c: i for i, c in enumerate(labels)}
     pilot_path = os.path.join(odir, "pilot.json")
 
-    # ---- pilot: lr selection (train=latn, val=latn, one seed)
+    # ---- pilot: lr selection SEPARATELY for each training condition (val in that condition, one seed)
     if args.stage in ("pilot", "all"):
-        res = {}
-        for lr in args.lrs:
-            r = run_one(args, tok, label2id, "latn", lr, args.pilot_seed, ["latn"])
-            res[repr(lr)] = r["val_macro_f1"]
-            print(f"[pilot] {args.model} lr={lr} val_macroF1={r['val_macro_f1']:.4f}", flush=True)
-        best_lr = float(max(res, key=res.get))  # ties -> first (lowest) lr in the grid order
-        json.dump({"grid": res, "selected_lr": best_lr, "pilot_seed": args.pilot_seed,
-                   "note": "selected on validation Macro-F1, train=latn only"},
-                  open(pilot_path, "w"), indent=2)
+        sel = json.load(open(pilot_path)) if os.path.exists(pilot_path) else {}
+        grid_all = sel.get("grid_by_train", {})
+        for tcond in args.train_conds:
+            res = grid_all.get(tcond, {})
+            for lr in args.lrs:
+                if repr(lr) in res:
+                    continue  # resume
+                r = run_one(args, tok, label2id, tcond, lr, args.pilot_seed, [])
+                res[repr(lr)] = r["val_macro_f1"]
+                print(f"[pilot] {args.model} train={tcond} lr={lr} val_macroF1={r['val_macro_f1']:.4f}", flush=True)
+            grid_all[tcond] = res
+            json.dump({"grid_by_train": grid_all, "pilot_seed": args.pilot_seed,
+                       "selected_lr_by_train": {t: float(max(g, key=g.get)) for t, g in grid_all.items()},
+                       "note": "per-train-condition lr, selected on validation Macro-F1 in that condition; "
+                               "ties -> first (lowest) lr in grid order"},
+                      open(pilot_path, "w"), indent=2)
 
-    # ---- final: reuse the selected lr for every training condition
+    # ---- final: each training condition uses its own selected lr
     if args.stage in ("final", "all"):
         if not os.path.exists(pilot_path):
             raise SystemExit(f"{pilot_path} missing: run --stage pilot (or all) first")
-        lr = json.load(open(pilot_path))["selected_lr"]
+        lr_by = json.load(open(pilot_path))["selected_lr_by_train"]
         runs_path = os.path.join(odir, "runs.jsonl")
-        done = set()  # resume support: never duplicate a (train_cond, seed) run
+        done = set()  # resume support: never duplicate a (train_cond, seed, lr) run
         if os.path.exists(runs_path):
             for line in open(runs_path, encoding="utf-8"):
                 d = json.loads(line)
                 done.add((d["train_cond"], d["seed"], d["lr"]))
         with open(runs_path, "a", encoding="utf-8") as f:
             for tcond in args.train_conds:
+                lr = lr_by[tcond]
                 for seed in args.seeds:
                     if (tcond, seed, lr) in done:
                         print(f"[skip] {tcond} seed={seed} already done", flush=True)
@@ -202,7 +211,7 @@ def main():
                     rec = {"model": args.model, "train_cond": tcond, "lr": lr, "seed": seed,
                            "label_names": labels, **r, "seconds": round(time.time() - t0, 1)}
                     f.write(json.dumps(rec) + "\n"); f.flush()
-                    print(f"[final] {args.model} train={tcond} seed={seed} " +
+                    print(f"[final] {args.model} train={tcond} lr={lr} seed={seed} " +
                           " ".join(f"{k}:{v['macro_f1']:.3f}" for k, v in r["tests"].items()), flush=True)
 
 
