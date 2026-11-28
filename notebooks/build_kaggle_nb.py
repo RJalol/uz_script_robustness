@@ -7,7 +7,7 @@ SRC = "/home/claude/script_robustness/"
 OUT = sys.argv[1]
 OVERRIDE = open(sys.argv[2]).read() if len(sys.argv) > 2 else None
 FILES = ["translit_uz.py", "test_translit.py", "prepare_data.py", "exp_encoder_sib200.py", "analyze_encoder.py",
-         "exp_llm_belebele.py", "analyze_llm.py", "exp_diagnostics.py"]
+         "exp_llm_belebele.py", "analyze_llm.py", "exp_diagnostics.py", "analyze_deep.py", "check_apostrophes.py"]
 
 buf = io.BytesIO()
 with tarfile.open(fileobj=buf, mode="w:gz", compresslevel=9) as t:
@@ -41,8 +41,8 @@ ENCODER_MODELS = [
     "tahrirchi/tahrirchi-bert-base",
     "tahrirchi/tahrirchi-bert-small",
 ]
-LLM_MODELS = ["Qwen/Qwen3-8B"]     # uzlm/alloma-8B-Instruct tokenizator tekshiruvidan keyin alohida
-LLM_SHOTS = [0]
+LLM_MODELS = ["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]   # alloma tokenizatori kirillni tashlaydi: asosiy taqqoslashdan chiqarilgan
+LLM_SHOTS = [0] if SMOKE else [0, 5]
 LLM_4BIT = True
 RUN_ENCODERS = True
 RUN_DIAGNOSTICS = True
@@ -87,6 +87,7 @@ code('run("python -m pytest -q test_translit.py")')
 md("## Ma'lumot tayyorlash (lotin / lotin-normallashgan / kirill)")
 code("""
 run("python prepare_data.py --out data" + (" --belebele" if RUN_LLM and LLM_MODELS else ""))
+run("python check_apostrophes.py data")   # SIB-200 and Belebele: apostrophe code points
 """)
 
 md("## Kodlovchilar (SIB-200): pilot, so'ng yakuniy; to'xtasa shu katakchani qayta ishga tushiring (resume)")
@@ -98,6 +99,7 @@ if RUN_ENCODERS:
             f"--stage all --epochs {EPOCHS} --seeds {' '.join(map(str, SEEDS))} --lrs {' '.join(LRS)}")
         print(f"### {m}: {(time.time()-t0)/60:.1f} min", flush=True)
     run("python analyze_encoder.py results/encoder results/tables")
+    run("python analyze_deep.py results/encoder results/tables")
 """)
 
 md("## Tokenizator tashxisi")
